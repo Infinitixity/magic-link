@@ -656,3 +656,55 @@ body.light-mode .list-item {
   background:
     rgba(0,0,0,0.05);
 }
+.header-logo {
+
+width: 42px;
+
+height: 42px;
+
+border-radius: 12px;
+
+object-fit: cover;
+
+box-shadow:
+0 0 20px #00E5FF,
+0 0 30px #FF2D95;
+
+animation:
+logoPulse 3s infinite ease-in-out;
+}
+
+.brand-left {
+
+display: flex;
+
+align-items: center;
+
+gap: 10px;
+
+font-weight: bold;
+}
+
+@keyframes logoPulse {
+
+0% {
+
+transform: scale(1);
+
+filter: brightness(1);
+}
+
+50% {
+
+transform: scale(1.05);
+
+filter: brightness(1.3);
+}
+
+100% {
+
+transform: scale(1);
+
+filter: brightness(1);
+}
+}
