@@ -1,587 +1,310 @@
 const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+
+const PORT = Number(process.env.PORT) || 3000;
+const HOST = process.env.HOST || '0.0.0.0';
+const MAX_NAME_LENGTH = 24;
+const MAX_MESSAGE_LENGTH = 500;
+const ROOM_HISTORY_LIMIT = 80;
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: process.env.CORS_ORIGIN || false
+  }
+});
 
-const http =
-  require('http').createServer(app);
+app.use(express.static('public'));
 
-const io =
-  require('socket.io')(http, {
-    cors: {
-      origin: '*'
-    }
-  });
+const users = new Map();
+const rooms = new Map();
+const actionBuckets = new Map();
 
-app.use(
-  express.static('public')
-);
-
-const users = {};
-
-const channels = {};
+function cleanText(value, maxLength) {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength);
+}
 
 function randomCoord() {
-  return (
-    Math.floor(
-      Math.random() * 80
-    ) + 10
-  );
+  return Math.floor(Math.random() * 78) + 11;
+}
+
+function isRateLimited(socketId, action, limit, windowMs) {
+  const key = `${socketId}:${action}`;
+  const now = Date.now();
+  const bucket = actionBuckets.get(key) || [];
+  const recent = bucket.filter((time) => now - time < windowMs);
+
+  if (recent.length >= limit) {
+    actionBuckets.set(key, recent);
+    return true;
+  }
+
+  recent.push(now);
+  actionBuckets.set(key, recent);
+  return false;
+}
+
+function publicUser(user) {
+  return {
+    id: user.id,
+    username: user.username,
+    x: user.x,
+    y: user.y,
+    status: user.status
+  };
 }
 
 function emitRadar() {
-  io.emit(
-    'update-radar',
-    Object.values(users)
-  );
+  io.emit('radar:update', Array.from(users.values()).map(publicUser));
 }
 
-function createChannel({
-  ownerId,
-  targetId,
-  secure = false
-}) {
+function emitRoom(room) {
+  const payload = roomPayload(room);
 
-  const groupId =
-    `group-${Date.now()}-${Math.floor(
-      Math.random() * 9999
-    )}`;
+  room.members.forEach((memberId) => {
+    io.to(memberId).emit('room:update', payload);
+  });
+}
 
-  const owner =
-    users[ownerId];
+function roomPayload(room) {
+  return {
+    id: room.id,
+    name: room.name,
+    ownerId: room.ownerId,
+    isPrivate: room.isPrivate,
+    members: room.members
+      .map((id) => users.get(id))
+      .filter(Boolean)
+      .map((user) => ({
+        id: user.id,
+        username: user.username
+      })),
+    messages: room.messages
+  };
+}
 
-  const target =
-    users[targetId];
+function createRoom(ownerId, targetId, isPrivate) {
+  const owner = users.get(ownerId);
+  const target = users.get(targetId);
 
-  if (
-    !owner ||
-    !target
-  ) {
+  if (!owner || !target || ownerId === targetId) {
     return null;
   }
 
-  const roomData = {
-    id: groupId,
-
-    name: secure
-      ? 'SECURE LINK'
-      : `${owner.username} CHAT`,
-
-    owner: ownerId,
-
-    secure,
-
-    banned: [],
-
-    users: [
-      ownerId,
-      targetId
-    ]
+  const room = {
+    id: `room-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name: isPrivate ? `${owner.username} private link` : `${owner.username} channel`,
+    ownerId,
+    isPrivate,
+    members: [ownerId, targetId],
+    banned: new Set(),
+    messages: [],
+    createdAt: Date.now()
   };
 
-  channels[groupId] =
-    roomData;
-
-  return roomData;
+  rooms.set(room.id, room);
+  return room;
 }
 
-io.on(
-  'connection',
-  (socket) => {
-
-    socket.on(
-      'join-system',
-      (username) => {
-
-        users[socket.id] = {
-          id: socket.id,
-
-          username,
-
-          x: randomCoord(),
-
-          y: randomCoord()
-        };
-
-        emitRadar();
-      }
-    );
-
-    socket.on(
-      'public-channel-request',
-      (data) => {
-
-        const requester =
-          users[socket.id];
-
-        const target =
-          users[data.targetId];
-
-        if (
-          !requester ||
-          !target
-        ) {
-          return;
-        }
-
-        io.to(
-          data.targetId
-        ).emit(
-          'receive-public-request',
-          {
-            requester:
-              requester.username,
-
-            requesterId:
-              socket.id,
-
-            groupId:
-              data.groupId || null
-          }
-        );
-      }
-    );
-
-    socket.on(
-      'secure-channel-request',
-      (data) => {
-
-        const requester =
-          users[socket.id];
-
-        const target =
-          users[data.targetId];
-
-        if (
-          !requester ||
-          !target
-        ) {
-          return;
-        }
-
-        io.to(
-          data.targetId
-        ).emit(
-          'receive-secure-request',
-          {
-            requester:
-              requester.username,
-
-            requesterId:
-              socket.id,
-
-            groupId:
-              data.groupId || null
-          }
-        );
-      }
-    );
-
-    socket.on(
-      'accept-public-request',
-      (data) => {
-
-        let room;
-
-        if (
-          data.groupId &&
-          channels[data.groupId]
-        ) {
-
-          room =
-            channels[
-              data.groupId
-            ];
-
-          if (
-            room.banned.includes(
-              socket.id
-            )
-          ) {
-            return;
-          }
-
-          if (
-            !room.users.includes(
-              socket.id
-            )
-          ) {
-
-            room.users.push(
-              socket.id
-            );
-          }
-
-        } else {
-
-          room =
-            createChannel({
-              ownerId:
-                data.requesterId,
-
-              targetId:
-                socket.id,
-
-              secure: false
-            });
-        }
-
-        if (!room) {
-          return;
-        }
-
-        const requesterSocket =
-          io.sockets.sockets.get(
-            data.requesterId
-          );
-
-        if (!requesterSocket) {
-          return;
-        }
-
-        socket.join(
-          room.id
-        );
-
-        requesterSocket.join(
-          room.id
-        );
-
-        room.memberNames =
-          room.users
-            .map(
-              (id) =>
-                users[id]?.username
-            )
-            .filter(Boolean);
-
-        io.to(room.id).emit(
-          'start-chat',
-          {
-            groupId:
-              room.id,
-
-            groupData:
-              room
-          }
-        );
-      }
-    );
-
-    socket.on(
-      'accept-secure-request',
-      (data) => {
-
-        let room;
-
-        if (
-          data.groupId &&
-          channels[data.groupId]
-        ) {
-
-          room =
-            channels[
-              data.groupId
-            ];
-
-          if (
-            room.banned.includes(
-              socket.id
-            )
-          ) {
-            return;
-          }
-
-          if (
-            !room.users.includes(
-              socket.id
-            )
-          ) {
-
-            room.users.push(
-              socket.id
-            );
-          }
-
-        } else {
-
-          room =
-            createChannel({
-              ownerId:
-                data.requesterId,
-
-              targetId:
-                socket.id,
-
-              secure: true
-            });
-        }
-
-        if (!room) {
-          return;
-        }
-
-        const requesterSocket =
-          io.sockets.sockets.get(
-            data.requesterId
-          );
-
-        if (!requesterSocket) {
-          return;
-        }
-
-        socket.join(
-          room.id
-        );
-
-        requesterSocket.join(
-          room.id
-        );
-
-        room.memberNames =
-          room.users
-            .map(
-              (id) =>
-                users[id]?.username
-            )
-            .filter(Boolean);
-
-        io.to(room.id).emit(
-          'start-chat',
-          {
-            groupId:
-              room.id,
-
-            groupData:
-              room
-          }
-        );
-      }
-    );
-
-    socket.on(
-      'send-message',
-      (data) => {
-
-        const sender =
-          users[socket.id];
-
-        const room =
-          channels[
-            data.groupId
-          ];
-
-        if (
-          !sender ||
-          !room
-        ) {
-          return;
-        }
-
-        if (
-          !room.users.includes(
-            socket.id
-          )
-        ) {
-          return;
-        }
-
-        io.to(
-          data.groupId
-        ).emit(
-          'new-message',
-          {
-            groupId:
-              data.groupId,
-
-            user:
-              sender.username,
-
-            text:
-              data.message
-          }
-        );
-      }
-    );
-
-    socket.on(
-      'kick-user',
-      (data) => {
-
-        const room =
-          channels[
-            data.groupId
-          ];
-
-        if (!room) {
-          return;
-        }
-
-        if (
-          room.owner !==
-          socket.id
-        ) {
-          return;
-        }
-
-        const target =
-          Object.values(
-            users
-          ).find(
-            (u) =>
-              u.username ===
-              data.username
-          );
-
-        if (!target) {
-          return;
-        }
-
-        room.users =
-          room.users.filter(
-            (id) =>
-              id !== target.id
-          );
-
-        room.memberNames =
-          room.users
-            .map(
-              (id) =>
-                users[id]?.username
-            )
-            .filter(Boolean);
-
-        const targetSocket =
-          io.sockets.sockets.get(
-            target.id
-          );
-
-        if (targetSocket) {
-
-          targetSocket.leave(
-            room.id
-          );
-
-          targetSocket.emit(
-            'removed-from-channel',
-            {
-              type: 'kick'
-            }
-          );
-        }
-      }
-    );
-
-    socket.on(
-      'ban-user',
-      (data) => {
-
-        const room =
-          channels[
-            data.groupId
-          ];
-
-        if (!room) {
-          return;
-        }
-
-        if (
-          room.owner !==
-          socket.id
-        ) {
-          return;
-        }
-
-        const target =
-          Object.values(
-            users
-          ).find(
-            (u) =>
-              u.username ===
-              data.username
-          );
-
-        if (!target) {
-          return;
-        }
-
-        room.banned.push(
-          target.id
-        );
-
-        room.users =
-          room.users.filter(
-            (id) =>
-              id !== target.id
-          );
-
-        room.memberNames =
-          room.users
-            .map(
-              (id) =>
-                users[id]?.username
-            )
-            .filter(Boolean);
-
-        const targetSocket =
-          io.sockets.sockets.get(
-            target.id
-          );
-
-        if (targetSocket) {
-
-          targetSocket.leave(
-            room.id
-          );
-
-          targetSocket.emit(
-            'removed-from-channel',
-            {
-              type: 'ban'
-            }
-          );
-        }
-      }
-    );
-
-    socket.on(
-      'disconnect',
-      () => {
-
-        delete users[
-          socket.id
-        ];
-
-        Object.values(
-          channels
-        ).forEach((room) => {
-
-          room.users =
-            room.users.filter(
-              (id) =>
-                id !== socket.id
-            );
-
-          room.memberNames =
-            room.users
-              .map(
-                (id) =>
-                  users[id]?.username
-              )
-              .filter(Boolean);
-        });
-
-        emitRadar();
-      }
-    );
+function joinSocketToRoom(socketId, room) {
+  const memberSocket = io.sockets.sockets.get(socketId);
+
+  if (memberSocket) {
+    memberSocket.join(room.id);
   }
-);
+}
 
-http.listen(
-  3000,
-  '0.0.0.0',
-  () => {
-    console.log(
-      'MAGIC LINK ACTIVE : 3000'
-    );
+function removeMember(room, targetId, type) {
+  room.members = room.members.filter((id) => id !== targetId);
+
+  const targetSocket = io.sockets.sockets.get(targetId);
+  if (targetSocket) {
+    targetSocket.leave(room.id);
+    targetSocket.emit('room:removed', {
+      roomId: room.id,
+      type
+    });
   }
-);
+
+  emitRoom(room);
+}
+
+io.on('connection', (socket) => {
+  socket.on('user:join', (payload = {}) => {
+    if (isRateLimited(socket.id, 'join', 8, 10000)) {
+      return;
+    }
+
+    const username = cleanText(payload.username, MAX_NAME_LENGTH);
+
+    if (!username) {
+      socket.emit('app:error', 'Choose a name to enter the radar.');
+      return;
+    }
+
+    users.set(socket.id, {
+      id: socket.id,
+      username,
+      x: randomCoord(),
+      y: randomCoord(),
+      status: payload.status === 'busy' ? 'busy' : 'available'
+    });
+
+    socket.emit('user:ready', publicUser(users.get(socket.id)));
+    emitRadar();
+  });
+
+  socket.on('radar:refresh', () => {
+    socket.emit('radar:update', Array.from(users.values()).map(publicUser));
+  });
+
+  socket.on('room:request', (payload = {}) => {
+    if (isRateLimited(socket.id, 'request', 10, 15000)) {
+      socket.emit('app:error', 'Slow down a little before sending more invites.');
+      return;
+    }
+
+    const requester = users.get(socket.id);
+    const target = users.get(payload.targetId);
+
+    if (!requester || !target || target.id === socket.id) {
+      return;
+    }
+
+    const roomId = cleanText(payload.roomId, 80) || null;
+    const room = roomId ? rooms.get(roomId) : null;
+
+    if (room && (!room.members.includes(socket.id) || room.banned.has(target.id))) {
+      return;
+    }
+
+    io.to(target.id).emit('room:invite', {
+      requesterId: socket.id,
+      requesterName: requester.username,
+      roomId,
+      isPrivate: Boolean(payload.isPrivate || room?.isPrivate)
+    });
+  });
+
+  socket.on('room:accept', (payload = {}) => {
+    const target = users.get(socket.id);
+    const requester = users.get(payload.requesterId);
+
+    if (!target || !requester) {
+      return;
+    }
+
+    let room = null;
+    const requestedRoomId = cleanText(payload.roomId, 80);
+
+    if (requestedRoomId) {
+      room = rooms.get(requestedRoomId);
+
+      if (!room || !room.members.includes(payload.requesterId) || room.banned.has(socket.id)) {
+        return;
+      }
+
+      if (!room.members.includes(socket.id)) {
+        room.members.push(socket.id);
+      }
+    } else {
+      room = createRoom(payload.requesterId, socket.id, Boolean(payload.isPrivate));
+    }
+
+    if (!room) {
+      return;
+    }
+
+    room.members.forEach((memberId) => joinSocketToRoom(memberId, room));
+    emitRoom(room);
+
+    io.to(room.id).emit('room:opened', roomPayload(room));
+  });
+
+  socket.on('message:send', (payload = {}) => {
+    if (isRateLimited(socket.id, 'message', 25, 10000)) {
+      socket.emit('app:error', 'Message limit reached. Try again in a moment.');
+      return;
+    }
+
+    const sender = users.get(socket.id);
+    const room = rooms.get(payload.roomId);
+    const text = cleanText(payload.text, MAX_MESSAGE_LENGTH);
+
+    if (!sender || !room || !text || !room.members.includes(socket.id)) {
+      return;
+    }
+
+    const message = {
+      id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      roomId: room.id,
+      senderId: socket.id,
+      senderName: sender.username,
+      text,
+      sentAt: Date.now()
+    };
+
+    room.messages.push(message);
+    room.messages = room.messages.slice(-ROOM_HISTORY_LIMIT);
+
+    io.to(room.id).emit('message:new', message);
+  });
+
+  socket.on('room:remove-member', (payload = {}) => {
+    const room = rooms.get(payload.roomId);
+    const targetId = cleanText(payload.targetId, 120);
+
+    if (!room || room.ownerId !== socket.id || targetId === socket.id) {
+      return;
+    }
+
+    if (!room.members.includes(targetId)) {
+      return;
+    }
+
+    if (payload.ban) {
+      room.banned.add(targetId);
+    }
+
+    removeMember(room, targetId, payload.ban ? 'ban' : 'kick');
+  });
+
+  socket.on('disconnect', () => {
+    users.delete(socket.id);
+    actionBuckets.forEach((_, key) => {
+      if (key.startsWith(`${socket.id}:`)) {
+        actionBuckets.delete(key);
+      }
+    });
+
+    rooms.forEach((room, roomId) => {
+      if (!room.members.includes(socket.id)) {
+        return;
+      }
+
+      room.members = room.members.filter((id) => id !== socket.id);
+
+      if (room.members.length === 0) {
+        rooms.delete(roomId);
+        return;
+      }
+
+      if (room.ownerId === socket.id) {
+        room.ownerId = room.members[0];
+      }
+
+      emitRoom(room);
+    });
+
+    emitRadar();
+  });
+});
+
+server.listen(PORT, HOST, () => {
+  console.log(`Magic Link radar chat running on http://${HOST}:${PORT}`);
+});
