@@ -1,6 +1,7 @@
 # Magic Link
 
 Magic Link is a realtime radar-style chat prototype. Users join with a display name, see nearby signals on a radar, invite people into channels, and chat live through Socket.IO.
+No use reading anything below use this link to test the website https://magic-link-4nra.onrender.com/
 
 ## Run locally
 
