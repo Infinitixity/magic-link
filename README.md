@@ -12,9 +12,13 @@ npm start
 
 Then open `http://localhost:3000`.
 
+## Install On Raspberry Pi
+
+Use the full step-by-step Pi guide in `PI_INSTALL.md`.
+
 ## Raspberry Pi without home Wi-Fi
 
-Use the offline server guide in `deploy/RASPBERRY_PI_OFFLINE_SERVER.md`. It shows how to make the Raspberry Pi create its own Wi-Fi hotspot so phones/laptops can connect directly to the Pi and open `http://10.42.0.1`.
+Use the offline server guide in `magic-link-main/deploy/RASPBERRY_PI_OFFLINE_SERVER.md`. It shows how to make the Raspberry Pi create its own Wi-Fi hotspot so phones/laptops can connect directly to the Pi and open `http://10.42.0.1`.
 
 ## What improved
 
