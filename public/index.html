@@ -1,0 +1,1003 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+
+<meta
+  name="viewport"
+  content="width=device-width, initial-scale=1.0"
+>
+
+<title>MAGIC LINK</title>
+
+<link
+  rel="stylesheet"
+  href="style.css"
+>
+
+<script src="/socket.io/socket.io.js"></script>
+</head>
+
+<body>
+
+<header id="top-header">
+
+<button
+  class="dynamic-btn settings-btn"
+  onclick="openSettings()"
+>
+⚙
+</button>
+
+<div class="brand-left">
+
+<img
+  src="/logo.png"
+  class="header-logo"
+>
+
+<span>
+MAGIC LINK
+</span>
+
+</div>
+
+<div class="system-status">
+ONLINE
+</div>
+
+</header>
+
+<main id="radar-screen">
+
+<div class="large-radar">
+
+<div class="radar-sweep"></div>
+
+<div id="blip-container"></div>
+
+</div>
+
+<div class="switch-container">
+
+<span>
+SECURE MODE
+</span>
+
+<label class="switch">
+
+<input
+  type="checkbox"
+  id="secure-toggle"
+>
+
+<span class="slider"></span>
+
+</label>
+
+</div>
+
+<div class="radar-lists">
+
+<div id="all-channels-list">
+
+<div class="channel-header">
+<h3>
+ALL CHANNELS
+</h3>
+</div>
+
+<div
+  id="channels-container"
+></div>
+
+</div>
+
+</div>
+
+</main>
+
+<section
+id="chat-room"
+class="hidden"
+>
+
+<div class="chat-header">
+
+<div class="chat-actions">
+
+<button
+  class="dynamic-btn"
+  onclick="toggleView('radar')"
+>
+BACK
+</button>
+
+<button
+  class="dynamic-btn"
+  onclick="inviteUserOverlay()"
+>
+INVITE
+</button>
+
+<button
+  id="host-controls-btn"
+  class="dynamic-btn hidden"
+  onclick="openHostControls()"
+>
+HOST
+</button>
+
+</div>
+
+<h2 id="chat-title">
+CHANNEL
+</h2>
+
+</div>
+
+<div id="messages-display"></div>
+
+<div class="input-area">
+
+<input
+  type="text"
+  id="message-input"
+  placeholder="Type signal..."
+>
+
+<button
+  class="dynamic-btn"
+  onclick="sendMessage()"
+>
+SEND
+</button>
+
+</div>
+
+</section>
+
+<section
+id="settings-panel"
+class="hidden"
+>
+
+<div class="settings-card">
+
+<h2>
+SETTINGS
+</h2>
+
+<input
+  type="text"
+  id="settings-username"
+  placeholder="Username"
+>
+
+<button
+  class="dynamic-btn"
+  onclick="saveUsername()"
+>
+SAVE NAME
+</button>
+
+<button
+  class="dynamic-btn"
+  onclick="toggleTheme()"
+>
+TOGGLE DARK/LIGHT
+</button>
+
+<button
+  class="dynamic-btn"
+  onclick="closeSettings()"
+>
+CLOSE
+</button>
+
+</div>
+
+</section>
+
+<div
+id="overlay-wrapper"
+class="overlay-hidden"
+>
+
+<div class="overlay-card">
+
+<h2 id="overlay-title">
+LOGIN
+</h2>
+
+<p id="overlay-body">
+Name:
+</p>
+
+<div id="overlay-input-container">
+
+<input
+  type="text"
+  id="overlay-input"
+>
+
+</div>
+
+<button
+  id="overlay-confirm"
+  class="dynamic-btn"
+>
+CONFIRM
+</button>
+
+</div>
+
+</div>
+
+<script>
+
+const socket = io({
+transports: ['websocket'],
+upgrade: false
+});
+
+let myName = '';
+
+let lastUsers = [];
+
+let activeGroups = {};
+
+let currentGroupId = null;
+
+let inviteMode = false;
+
+function getDist(
+x1,
+y1,
+x2,
+y2
+) {
+
+return Math.sqrt(
+Math.pow(x2 - x1, 2) +
+Math.pow(y2 - y1, 2)
+);
+}
+
+function toggleTheme() {
+
+document.body.classList.toggle(
+'light-mode'
+);
+
+if (
+document.body.classList.contains(
+'light-mode'
+)
+) {
+
+localStorage.setItem(
+'theme',
+'light'
+);
+
+} else {
+
+localStorage.setItem(
+'theme',
+'dark'
+);
+}
+}
+
+function openSettings() {
+
+document
+.getElementById(
+'settings-panel'
+)
+.classList.remove(
+'hidden'
+);
+
+document
+.getElementById(
+'settings-username'
+).value = myName;
+}
+
+function closeSettings() {
+
+document
+.getElementById(
+'settings-panel'
+)
+.classList.add(
+'hidden'
+);
+}
+
+function saveUsername() {
+
+const newName =
+document.getElementById(
+'settings-username'
+).value;
+
+if (!newName.trim()) {
+return;
+}
+
+localStorage.setItem(
+'overdrive-name',
+newName
+);
+
+location.reload();
+}
+
+function joinSystem(
+username
+) {
+
+myName = username;
+
+socket.emit(
+'join-system',
+username
+);
+}
+
+window.onload = () => {
+
+const savedTheme =
+localStorage.getItem(
+'theme'
+);
+
+if (
+savedTheme === 'light'
+) {
+
+document.body.classList.add(
+'light-mode'
+);
+}
+
+const savedName =
+localStorage.getItem(
+'overdrive-name'
+);
+
+if (savedName) {
+
+joinSystem(savedName);
+
+} else {
+
+document
+.getElementById(
+'overlay-wrapper'
+)
+.classList.remove(
+'overlay-hidden'
+);
+
+document
+.getElementById(
+'overlay-confirm'
+).onclick = () => {
+
+const name =
+document
+.getElementById(
+'overlay-input'
+).value;
+
+localStorage.setItem(
+'overdrive-name',
+name
+);
+
+joinSystem(name);
+
+document
+.getElementById(
+'overlay-wrapper'
+)
+.classList.add(
+'overlay-hidden'
+);
+};
+}
+
+setInterval(() => {
+
+socket.emit(
+'request-radar-refresh'
+);
+
+}, 3000);
+};
+
+socket.on(
+'update-radar',
+(users) => {
+
+if (
+!Array.isArray(users)
+) {
+return;
+}
+
+lastUsers = [...users];
+
+window.requestAnimationFrame(
+() => {
+renderBlips(lastUsers);
+}
+);
+}
+);
+
+function renderBlips(users) {
+
+const container =
+document.getElementById(
+'blip-container'
+);
+
+const existing =
+new Map();
+
+Array.from(
+container.children
+).forEach((child) => {
+
+if (
+child.dataset.userid
+) {
+
+existing.set(
+child.dataset.userid,
+child
+);
+}
+});
+
+const me =
+users.find(
+(u) =>
+u.id === socket.id
+);
+
+if (!me) {
+return;
+}
+
+const activeIds =
+new Set();
+
+users.forEach((u) => {
+
+if (
+u.id === socket.id
+) {
+return;
+}
+
+if (
+getDist(
+me.x,
+me.y,
+u.x,
+u.y
+) >= 40
+) {
+return;
+}
+
+activeIds.add(u.id);
+
+let blip =
+existing.get(u.id);
+
+if (!blip) {
+
+blip =
+document.createElement(
+'div'
+);
+
+blip.className =
+'user-blip';
+
+blip.dataset.userid =
+u.id;
+
+container.appendChild(
+blip
+);
+}
+
+blip.style.left =
+u.x + '%';
+
+blip.style.top =
+u.y + '%';
+
+blip.innerHTML = `
+${u.username
+.substring(0,2)
+.toUpperCase()}
+
+<span class="blip-name">
+${u.username}
+</span>
+`;
+
+blip.onclick = () => {
+
+if (inviteMode) {
+
+socket.emit(
+'public-channel-request',
+{
+targetId:
+u.id,
+
+groupId:
+window.inviteGroupId
+}
+);
+
+inviteMode = false;
+
+toggleView('chat');
+
+return;
+}
+
+const secure =
+document.getElementById(
+'secure-toggle'
+).checked;
+
+if (secure) {
+
+socket.emit(
+'secure-channel-request',
+{
+targetId:
+u.id
+}
+);
+
+} else {
+
+socket.emit(
+'public-channel-request',
+{
+targetId:
+u.id
+}
+);
+}
+};
+});
+
+existing.forEach(
+(blip, id) => {
+
+if (
+!activeIds.has(id)
+) {
+
+blip.remove();
+}
+}
+);
+}
+
+socket.on(
+'receive-public-request',
+(data) => {
+
+const accepted =
+confirm(
+`${data.requester} wants to chat`
+);
+
+if (accepted) {
+
+socket.emit(
+'accept-public-request',
+data
+);
+}
+}
+);
+
+socket.on(
+'receive-secure-request',
+(data) => {
+
+const accepted =
+confirm(
+`${data.requester} requests secure link`
+);
+
+if (accepted) {
+
+socket.emit(
+'accept-secure-request',
+data
+);
+}
+}
+);
+
+socket.on(
+'start-chat',
+(data) => {
+
+activeGroups[
+data.groupId
+] = {
+
+name:
+data.groupData.name,
+
+owner:
+data.groupData.owner,
+
+secure:
+data.groupData.secure,
+
+messages: [],
+
+members:
+data.groupData
+.memberNames || []
+};
+
+updateChannels();
+
+openRoom(
+data.groupId
+);
+}
+);
+
+socket.on(
+'new-message',
+(msg) => {
+
+if (
+activeGroups[
+msg.groupId
+]
+) {
+
+activeGroups[
+msg.groupId
+].messages.push(
+msg
+);
+
+if (
+currentGroupId ===
+msg.groupId
+) {
+
+renderMessages();
+}
+}
+}
+);
+
+socket.on(
+'removed-from-channel',
+() => {
+
+alert(
+'Removed from channel'
+);
+
+toggleView('radar');
+}
+);
+
+function updateChannels() {
+
+const container =
+document.getElementById(
+'channels-container'
+);
+
+container.innerHTML = '';
+
+Object.keys(
+activeGroups
+).forEach((id) => {
+
+const row =
+document.createElement(
+'div'
+);
+
+row.className =
+'channel-row';
+
+const btn =
+document.createElement(
+'div'
+);
+
+btn.className =
+'list-item';
+
+btn.innerText =
+activeGroups[id].name;
+
+btn.onclick = () =>
+openRoom(id);
+
+row.appendChild(btn);
+
+container.appendChild(
+row
+);
+});
+}
+
+function openRoom(id) {
+
+currentGroupId = id;
+
+document.getElementById(
+'chat-title'
+).innerText =
+activeGroups[id].name;
+
+renderMessages();
+
+toggleView('chat');
+
+if (
+activeGroups[id].owner ===
+socket.id
+) {
+
+document
+.getElementById(
+'host-controls-btn'
+)
+.classList.remove(
+'hidden'
+);
+
+} else {
+
+document
+.getElementById(
+'host-controls-btn'
+)
+.classList.add(
+'hidden'
+);
+}
+}
+
+function renderMessages() {
+
+const display =
+document.getElementById(
+'messages-display'
+);
+
+display.innerHTML = '';
+
+activeGroups[
+currentGroupId
+].messages.forEach(
+(msg) => {
+
+const div =
+document.createElement(
+'div'
+);
+
+div.className =
+`message ${
+msg.user === myName
+? 'sent'
+: 'received'
+}`;
+
+div.innerText =
+`${msg.user}: ${msg.text}`;
+
+display.appendChild(
+div
+);
+}
+);
+
+display.scrollTop =
+display.scrollHeight;
+}
+
+function sendMessage() {
+
+const input =
+document.getElementById(
+'message-input'
+);
+
+if (
+!input.value ||
+!currentGroupId
+) {
+return;
+}
+
+socket.emit(
+'send-message',
+{
+groupId:
+currentGroupId,
+
+message:
+input.value
+}
+);
+
+input.value = '';
+}
+
+function toggleView(view) {
+
+document.getElementById(
+'radar-screen'
+).className =
+view === 'radar'
+? ''
+: 'hidden';
+
+document.getElementById(
+'chat-room'
+).className =
+view === 'chat'
+? ''
+: 'hidden';
+
+document.getElementById(
+'top-header'
+).style.display =
+view === 'chat'
+? 'none'
+: 'flex';
+}
+
+function inviteUserOverlay() {
+
+inviteMode = true;
+
+window.inviteGroupId =
+currentGroupId;
+
+toggleView('radar');
+
+alert(
+'Select user to invite'
+);
+}
+
+function openHostControls() {
+
+const room =
+activeGroups[
+currentGroupId
+];
+
+if (
+!room ||
+!room.members
+) {
+return;
+}
+
+const wrapper =
+document.createElement(
+'div'
+);
+
+wrapper.className =
+'member-overlay';
+
+const card =
+document.createElement(
+'div'
+);
+
+card.className =
+'member-card';
+
+room.members.forEach(
+(member) => {
+
+if (
+member === myName
+) {
+return;
+}
+
+const row =
+document.createElement(
+'div'
+);
+
+row.className =
+'member-row';
+
+row.innerText =
+member;
+
+row.onclick = () => {
+
+const ban =
+confirm(
+`Ban ${member}?`
+);
+
+if (ban) {
+
+socket.emit(
+'ban-user',
+{
+groupId:
+currentGroupId,
+
+username:
+member
+}
+);
+
+} else {
+
+socket.emit(
+'kick-user',
+{
+groupId:
+currentGroupId,
+
+username:
+member
+}
+);
+}
+
+wrapper.remove();
+};
+
+card.appendChild(
+row
+);
+}
+);
+
+wrapper.appendChild(card);
+
+wrapper.onclick = () =>
+wrapper.remove();
+
+document.body.appendChild(
+wrapper
+);
+}
+
+</script>
+
+</body>
+</html>
