@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "Magic Link",
+    "slug": "magic-link-native",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#071013",
+    "splash": {
+      "backgroundColor": "#071013",
+      "resizeMode": "contain"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.infinitixity.magiclink",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Magic Link uses the microphone for Radio mode push-to-talk."
+      }
+    },
+    "android": {
+      "package": "com.infinitixity.magiclink",
+      "adaptiveIcon": {
+        "backgroundColor": "#071013"
+      },
+      "permissions": [
+        "INTERNET",
+        "RECORD_AUDIO",
+        "MODIFY_AUDIO_SETTINGS"
+      ]
+    },
+    "extra": {
+      "eas": {
+        "projectId": "f6bd2e27-eb3c-434e-8359-c8c2d3bdd815"
+      }
+    },
+    "plugins": [
+      ["expo-build-properties", {
+        "android": {
+          "packagingOptions": {
+            "pickFirst": ["**/libc++_shared.so"]
+          }
+        }
+      }]
+    ]
+  }
+}

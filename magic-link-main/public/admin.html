@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Magic Link Admin</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="admin-body">
+  <main class="admin-shell">
+    <section class="admin-header">
+      <div>
+        <p class="eyebrow">Owner panel</p>
+        <h1>Magic Link Admin</h1>
+      </div>
+      <a class="admin-link" href="/">Open app</a>
+    </section>
+
+    <section id="admin-login" class="admin-card">
+      <h2>Enter admin token</h2>
+      <p>This panel can view users and clear stuck rooms. Keep the token private.</p>
+      <form id="token-form" class="admin-form">
+        <input id="token-input" type="password" autocomplete="current-password" placeholder="Admin token" required>
+        <button type="submit">Unlock</button>
+      </form>
+    </section>
+
+    <section id="admin-dashboard" class="hidden">
+      <div class="admin-grid">
+        <article class="admin-card stat-card">
+          <span>Online users</span>
+          <strong id="user-count">0</strong>
+        </article>
+        <article class="admin-card stat-card">
+          <span>Active rooms</span>
+          <strong id="room-count">0</strong>
+        </article>
+        <article class="admin-card stat-card">
+          <span>Radio channels</span>
+          <strong id="radio-count">0</strong>
+        </article>
+        <article class="admin-card stat-card">
+          <span>Uptime</span>
+          <strong id="uptime">0s</strong>
+        </article>
+      </div>
+
+      <div class="admin-actions">
+        <button id="refresh-admin" type="button">Refresh</button>
+        <button id="clear-rooms" class="danger-button" type="button">Clear rooms</button>
+        <button id="lock-admin" class="secondary-button" type="button">Lock</button>
+      </div>
+
+      <section class="admin-columns">
+        <article class="admin-card">
+          <h2>Users</h2>
+          <div id="admin-users" class="admin-list empty-state">No users online</div>
+        </article>
+
+        <article class="admin-card">
+          <h2>Rooms</h2>
+          <div id="admin-rooms" class="admin-list empty-state">No active rooms</div>
+        </article>
+
+        <article class="admin-card">
+          <h2>Radio</h2>
+          <div id="admin-radio" class="admin-list empty-state">No active radio channels</div>
+        </article>
+      </section>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script>
+    const els = {
+      login: document.getElementById('admin-login'),
+      dashboard: document.getElementById('admin-dashboard'),
+      tokenForm: document.getElementById('token-form'),
+      tokenInput: document.getElementById('token-input'),
+      userCount: document.getElementById('user-count'),
+      roomCount: document.getElementById('room-count'),
+      radioCount: document.getElementById('radio-count'),
+      uptime: document.getElementById('uptime'),
+      users: document.getElementById('admin-users'),
+      rooms: document.getElementById('admin-rooms'),
+      radio: document.getElementById('admin-radio'),
+      refresh: document.getElementById('refresh-admin'),
+      clearRooms: document.getElementById('clear-rooms'),
+      lock: document.getElementById('lock-admin'),
+      toast: document.getElementById('toast')
+    };
+
+    let adminToken = localStorage.getItem('magic-link-admin-token') || '';
+    let refreshTimer = null;
+    let uptimeTimer = null;
+    let isLoading = false;
+    let lastUptimeSeconds = 0;
+    let lastUptimeTick = Date.now();
+
+    function showToast(message) {
+      els.toast.textContent = message;
+      els.toast.classList.remove('hidden');
+      window.clearTimeout(showToast.timer);
+      showToast.timer = window.setTimeout(() => {
+        els.toast.classList.add('hidden');
+      }, 2600);
+    }
+
+    function formatUptime(seconds) {
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      const secs = seconds % 60;
+
+      if (hours > 0) {
+        return `${hours}h ${minutes}m`;
+      }
+
+      if (minutes > 0) {
+        return `${minutes}m ${secs}s`;
+      }
+
+      return `${secs}s`;
+    }
+
+    async function adminFetch(path, options = {}) {
+      const separator = path.includes('?') ? '&' : '?';
+      const freshPath = `${path}${separator}_=${Date.now()}`;
+      const response = await fetch(freshPath, {
+        ...options,
+        cache: 'no-store',
+        headers: {
+          'content-type': 'application/json',
+          'cache-control': 'no-cache',
+          'x-admin-token': adminToken,
+          ...(options.headers || {})
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Admin token was rejected');
+      }
+
+      return response.json();
+    }
+
+    function renderList(container, rows, emptyText) {
+      container.replaceChildren();
+
+      if (rows.length === 0) {
+        container.className = 'admin-list empty-state';
+        container.textContent = emptyText;
+        return;
+      }
+
+      container.className = 'admin-list';
+      rows.forEach((row) => container.appendChild(row));
+    }
+
+    function render(data) {
+      lastUptimeSeconds = data.uptimeSeconds;
+      lastUptimeTick = Date.now();
+      els.userCount.textContent = String(data.users.length);
+      els.roomCount.textContent = String(data.rooms.length);
+      els.radioCount.textContent = String(data.radioChannels?.length || 0);
+      updateUptimeDisplay();
+
+      const userRows = data.users.map((user) => {
+        const row = document.createElement('div');
+        row.className = 'admin-row';
+
+        const name = document.createElement('strong');
+        name.textContent = user.username;
+
+        const meta = document.createElement('span');
+        meta.textContent = `${user.status} · ${user.id.slice(0, 8)}`;
+
+        row.append(name, meta);
+        return row;
+      });
+
+      const roomRows = data.rooms.map((room) => {
+        const row = document.createElement('div');
+        row.className = 'admin-row admin-room-row';
+
+        const heading = document.createElement('div');
+        heading.className = 'admin-room-heading';
+
+        const name = document.createElement('strong');
+        name.textContent = room.name;
+
+        const meta = document.createElement('span');
+        meta.textContent = `${room.members.length} members · ${room.messageCount} messages${room.isPrivate ? ' · private' : ''}`;
+
+        const deleteButton = document.createElement('button');
+        deleteButton.type = 'button';
+        deleteButton.className = 'mini-danger-button';
+        deleteButton.textContent = 'Delete room';
+        deleteButton.addEventListener('click', () => deleteRoom(room));
+
+        heading.append(name, deleteButton);
+        row.append(heading, meta);
+
+        const memberList = document.createElement('div');
+        memberList.className = 'admin-room-members';
+
+        room.members.forEach((member) => {
+          const memberRow = document.createElement('div');
+          memberRow.className = 'admin-room-member';
+
+          const memberName = document.createElement('span');
+          memberName.textContent = member.username;
+
+          const kickButton = document.createElement('button');
+          kickButton.type = 'button';
+          kickButton.textContent = 'Kick';
+          kickButton.addEventListener('click', () => removeRoomMember(room, member));
+
+          memberRow.append(memberName, kickButton);
+          memberList.appendChild(memberRow);
+        });
+
+        row.appendChild(memberList);
+        return row;
+      });
+
+      const radioRows = (data.radioChannels || []).map((channel) => {
+        const row = document.createElement('div');
+        row.className = 'admin-row admin-room-row';
+
+        const heading = document.createElement('div');
+        heading.className = 'admin-room-heading';
+
+        const name = document.createElement('strong');
+        name.textContent = `Channel ${String(channel.channel).padStart(3, '0')}`;
+
+        const meta = document.createElement('span');
+        meta.textContent = `${channel.listeners} listeners - ${channel.bannedCount || 0} banned`;
+
+        heading.append(name);
+        row.append(heading, meta);
+
+        const memberList = document.createElement('div');
+        memberList.className = 'admin-room-members';
+
+        channel.members.forEach((member) => {
+          const memberRow = document.createElement('div');
+          memberRow.className = 'admin-room-member admin-radio-member';
+
+          const memberName = document.createElement('span');
+          memberName.textContent = `${member.username}${member.muted ? ' - muted' : ''}`;
+
+          const buttonGroup = document.createElement('div');
+          buttonGroup.className = 'admin-mini-actions';
+
+          const offButton = document.createElement('button');
+          offButton.type = 'button';
+          offButton.textContent = 'Turn off';
+          offButton.addEventListener('click', () => turnOffRadio(channel, member));
+
+          const muteButton = document.createElement('button');
+          muteButton.type = 'button';
+          muteButton.textContent = member.muted ? 'Unmute' : 'Mute';
+          muteButton.addEventListener('click', () => muteRadioMember(channel, member, !member.muted));
+
+          const banButton = document.createElement('button');
+          banButton.type = 'button';
+          banButton.className = 'mini-danger-button';
+          banButton.textContent = 'Ban';
+          banButton.addEventListener('click', () => banRadioMember(channel, member));
+
+          buttonGroup.append(offButton, muteButton, banButton);
+          memberRow.append(memberName, buttonGroup);
+          memberList.appendChild(memberRow);
+        });
+
+        if (channel.banned?.length) {
+          const bannedTitle = document.createElement('span');
+          bannedTitle.className = 'admin-subtitle';
+          bannedTitle.textContent = 'Banned users';
+          memberList.appendChild(bannedTitle);
+
+          channel.banned.forEach((member) => {
+            const memberRow = document.createElement('div');
+            memberRow.className = 'admin-room-member admin-radio-member';
+
+            const memberName = document.createElement('span');
+            memberName.textContent = member.username;
+
+            const unbanButton = document.createElement('button');
+            unbanButton.type = 'button';
+            unbanButton.textContent = 'Unban';
+            unbanButton.addEventListener('click', () => unbanRadioMember(channel, member));
+
+            memberRow.append(memberName, unbanButton);
+            memberList.appendChild(memberRow);
+          });
+        }
+
+        row.appendChild(memberList);
+        return row;
+      });
+
+      renderList(els.users, userRows, 'No users online');
+      renderList(els.rooms, roomRows, 'No active rooms');
+      renderList(els.radio, radioRows, 'No active radio channels');
+    }
+
+    async function loadDashboard() {
+      if (isLoading) {
+        return;
+      }
+
+      isLoading = true;
+
+      try {
+        const data = await adminFetch('/api/admin/status');
+        els.login.classList.add('hidden');
+        els.dashboard.classList.remove('hidden');
+        render(data);
+        startAutoRefresh();
+        startUptimeTicker();
+      } catch (error) {
+        localStorage.removeItem('magic-link-admin-token');
+        els.dashboard.classList.add('hidden');
+        els.login.classList.remove('hidden');
+        stopAutoRefresh();
+        stopUptimeTicker();
+        showToast(error.message);
+      } finally {
+        isLoading = false;
+      }
+    }
+
+    function startAutoRefresh() {
+      if (refreshTimer) {
+        return;
+      }
+
+      refreshTimer = window.setInterval(() => {
+        if (!adminToken || els.dashboard.classList.contains('hidden')) {
+          stopAutoRefresh();
+          return;
+        }
+
+        loadDashboard();
+      }, 2000);
+    }
+
+    function stopAutoRefresh() {
+      window.clearInterval(refreshTimer);
+      refreshTimer = null;
+    }
+
+    function startUptimeTicker() {
+      if (uptimeTimer) {
+        return;
+      }
+
+      updateUptimeDisplay();
+      uptimeTimer = window.setInterval(() => {
+        if (!adminToken || els.dashboard.classList.contains('hidden')) {
+          stopUptimeTicker();
+          return;
+        }
+
+        updateUptimeDisplay();
+      }, 1000);
+    }
+
+    function updateUptimeDisplay() {
+      const elapsed = Math.floor((Date.now() - lastUptimeTick) / 1000);
+      els.uptime.textContent = formatUptime(lastUptimeSeconds + elapsed);
+    }
+
+    function stopUptimeTicker() {
+      window.clearInterval(uptimeTimer);
+      uptimeTimer = null;
+    }
+
+    els.tokenForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      adminToken = els.tokenInput.value.trim();
+      localStorage.setItem('magic-link-admin-token', adminToken);
+      await loadDashboard();
+    });
+
+    els.refresh.addEventListener('click', loadDashboard);
+
+    els.clearRooms.addEventListener('click', async () => {
+      if (!confirm('Clear all active rooms? Users will return to the radar.')) {
+        return;
+      }
+
+      const data = await adminFetch('/api/admin/clear-rooms', {
+        method: 'POST',
+        body: '{}'
+      });
+
+      render(data);
+      showToast('Rooms cleared');
+    });
+
+    async function deleteRoom(room) {
+      if (!confirm(`Delete "${room.name}"? Everyone in it will return to the radar.`)) {
+        return;
+      }
+
+      const data = await adminFetch(`/api/admin/rooms/${encodeURIComponent(room.id)}/delete`, {
+        method: 'POST',
+        body: '{}'
+      });
+
+      render(data);
+      showToast('Room deleted');
+    }
+
+    async function removeRoomMember(room, member) {
+      if (!confirm(`Kick ${member.username} from "${room.name}"?`)) {
+        return;
+      }
+
+      const data = await adminFetch(`/api/admin/rooms/${encodeURIComponent(room.id)}/remove-member`, {
+        method: 'POST',
+        body: JSON.stringify({
+          targetId: member.id
+        })
+      });
+
+      render(data);
+      showToast('User removed from room');
+    }
+
+    async function turnOffRadio(channel, member) {
+      if (!confirm(`Turn off ${member.username}'s radio on channel ${channel.channel}?`)) {
+        return;
+      }
+
+      const data = await adminFetch(`/api/admin/radio/${encodeURIComponent(channel.channel)}/turn-off`, {
+        method: 'POST',
+        body: JSON.stringify({
+          targetId: member.id
+        })
+      });
+
+      render(data);
+      showToast('Radio turned off');
+    }
+
+    async function muteRadioMember(channel, member, muted) {
+      const data = await adminFetch(`/api/admin/radio/${encodeURIComponent(channel.channel)}/mute`, {
+        method: 'POST',
+        body: JSON.stringify({
+          targetId: member.id,
+          muted
+        })
+      });
+
+      render(data);
+      showToast(muted ? 'Radio user muted' : 'Radio user unmuted');
+    }
+
+    async function banRadioMember(channel, member) {
+      if (!confirm(`Ban ${member.username} from radio channel ${channel.channel}?`)) {
+        return;
+      }
+
+      const data = await adminFetch(`/api/admin/radio/${encodeURIComponent(channel.channel)}/ban`, {
+        method: 'POST',
+        body: JSON.stringify({
+          targetId: member.id
+        })
+      });
+
+      render(data);
+      showToast('Radio user banned');
+    }
+
+    async function unbanRadioMember(channel, member) {
+      const data = await adminFetch(`/api/admin/radio/${encodeURIComponent(channel.channel)}/unban`, {
+        method: 'POST',
+        body: JSON.stringify({
+          targetId: member.id
+        })
+      });
+
+      render(data);
+      showToast('Radio user unbanned');
+    }
+
+    els.lock.addEventListener('click', () => {
+      localStorage.removeItem('magic-link-admin-token');
+      adminToken = '';
+      stopAutoRefresh();
+      stopUptimeTicker();
+      els.dashboard.classList.add('hidden');
+      els.login.classList.remove('hidden');
+    });
+
+    if (adminToken) {
+      loadDashboard();
+    }
+  </script>
+</body>
+</html>

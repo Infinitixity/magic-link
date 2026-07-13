@@ -1,0 +1,23 @@
+{
+  "name": "magic-link",
+  "version": "1.0.0",
+  "description": "A realtime radar-style chat app built with Express and Socket.IO.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js"
+  },
+  "keywords": [
+    "chat",
+    "socket.io",
+    "realtime"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "express": "^5.2.1",
+    "socket.io": "^4.8.3",
+    "uuid": "^14.0.0"
+  }
+}

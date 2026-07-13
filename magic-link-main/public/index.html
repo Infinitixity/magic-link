@@ -1,0 +1,1238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Magic Link</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <img src="/logo.png" alt="" class="brand-logo">
+        <div>
+          <strong>Magic Link</strong>
+          <span>Realtime radar chat</span>
+        </div>
+      </div>
+
+      <div class="topbar-actions">
+        <div class="mode-tabs" role="tablist" aria-label="App mode">
+          <button id="radar-tab" class="mode-tab active" type="button">Radar</button>
+          <button id="radio-tab" class="mode-tab" type="button">Radio</button>
+        </div>
+        <span id="connection-state" class="status-pill">Connecting</span>
+        <button id="settings-button" class="icon-button" type="button" aria-label="Open settings">⚙</button>
+      </div>
+    </header>
+
+    <main id="radar-mode" class="workspace">
+      <section class="radar-panel">
+        <div class="radar-header">
+          <div>
+            <p class="eyebrow">Online signals</p>
+            <h1>Radar</h1>
+          </div>
+
+          <label class="mode-toggle">
+            <input id="private-toggle" type="checkbox">
+            <span>Private invite</span>
+          </label>
+        </div>
+
+        <div class="radar">
+          <div class="radar-ring"></div>
+          <div class="radar-ring inner"></div>
+          <div class="radar-sweep"></div>
+          <div id="blip-container"></div>
+          <div class="radar-center">YOU</div>
+        </div>
+
+        <div class="radar-footer">
+          <span id="nearby-count">0 online</span>
+          <span id="current-user">Not joined</span>
+        </div>
+      </section>
+
+      <section class="side-panel">
+        <div class="panel-section">
+          <div class="section-title">
+            <h2>Channels</h2>
+            <button id="refresh-button" class="text-button" type="button">Refresh</button>
+          </div>
+          <div id="room-list" class="room-list empty-state">No channels yet</div>
+        </div>
+
+        <div class="panel-section">
+          <div class="section-title">
+            <h2>Members</h2>
+            <span id="member-count">0</span>
+          </div>
+          <div id="member-list" class="member-list empty-state">Open a channel</div>
+        </div>
+      </section>
+
+      <section class="chat-panel">
+        <div class="chat-header">
+          <div>
+            <p class="eyebrow">Active channel</p>
+            <h2 id="chat-title">No channel selected</h2>
+          </div>
+          <button id="invite-button" class="text-button" type="button" disabled>Invite</button>
+        </div>
+
+        <div id="messages" class="messages empty-state">Select a signal to start chatting</div>
+        <button id="new-messages-button" class="new-messages-button hidden" type="button">New messages</button>
+
+        <form id="message-form" class="composer">
+          <textarea id="message-input" maxlength="500" rows="1" placeholder="Send a message" disabled></textarea>
+          <button id="send-button" type="submit" disabled>Send</button>
+        </form>
+      </section>
+    </main>
+
+    <main id="radio-mode" class="radio-workspace hidden">
+      <section class="radio-console">
+        <div class="radio-statusbar">
+          <span id="radio-mic-status" class="mic-status off">MIC OFF</span>
+          <span id="radio-network-status">RADIO OFF</span>
+          <span id="radio-listener-count">0 LISTENERS</span>
+        </div>
+
+        <div class="radio-display">
+          <p class="eyebrow">Current channel</p>
+          <strong id="radio-channel-display">001</strong>
+          <span id="radio-channel-state">CLOSED</span>
+        </div>
+
+        <div class="radio-tuner-wrap">
+          <output id="radio-channel-label" for="radio-channel-slider">CHANNEL 001</output>
+          <input id="radio-channel-slider" class="radio-tuner" type="range" min="1" max="100" value="1" step="1">
+          <div class="radio-scale" aria-hidden="true">
+            <span>001</span><span>025</span><span>050</span><span>075</span><span>100</span>
+          </div>
+        </div>
+
+        <div class="active-radio-section">
+          <div class="section-title">
+            <h2>Active channels</h2>
+            <span id="active-radio-count">0</span>
+          </div>
+          <div id="active-radio-channels" class="active-radio-list empty-state">No active channels</div>
+        </div>
+
+        <div id="radio-audio-container" class="radio-audio-container" aria-hidden="true"></div>
+
+        <div class="radio-controls">
+          <button id="radio-power-button" class="radio-power-button" type="button">Radio off</button>
+          <button id="radio-ptt-button" class="radio-ptt-button" type="button" disabled>
+            <span>HOLD TO TALK</span>
+            <small>Release to mute</small>
+          </button>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="join-modal" class="modal">
+    <form id="join-form" class="modal-card">
+      <img src="/logo.png" alt="" class="modal-logo">
+      <p class="eyebrow">Enter the network</p>
+      <h2>Choose your signal name</h2>
+      <input id="name-input" type="text" maxlength="24" autocomplete="nickname" placeholder="Your name" required>
+      <button type="submit">Join radar</button>
+    </form>
+  </div>
+
+  <div id="invite-modal" class="modal hidden">
+    <div class="modal-card">
+      <p class="eyebrow">Incoming invite</p>
+      <h2 id="invite-title">Chat request</h2>
+      <p id="invite-body"></p>
+      <div class="modal-actions">
+        <button id="decline-invite" class="secondary-button" type="button">Decline</button>
+        <button id="accept-invite" type="button">Accept</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="settings-modal" class="modal hidden">
+    <form id="settings-form" class="modal-card settings-modal-card">
+      <p class="eyebrow">Preferences</p>
+      <h2>Settings</h2>
+
+      <label class="field-group">
+        <span>Display name</span>
+        <input id="settings-name" type="text" maxlength="24" autocomplete="nickname" placeholder="Your name">
+      </label>
+
+      <label class="setting-row">
+        <span>Light mode</span>
+        <input id="settings-light-mode" type="checkbox">
+      </label>
+
+      <label class="setting-row">
+        <span>Compact messages</span>
+        <input id="settings-compact-mode" type="checkbox">
+      </label>
+
+      <label class="setting-row">
+        <span>Reduce motion</span>
+        <input id="settings-reduce-motion" type="checkbox">
+      </label>
+
+      <div class="modal-actions split-actions">
+        <button id="clear-local-data" class="secondary-button" type="button">Clear this device</button>
+        <div>
+          <button id="close-settings" class="secondary-button" type="button">Cancel</button>
+          <button type="submit">Save</button>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script>
+    const socket = io();
+
+    const state = {
+      me: null,
+      users: [],
+      rooms: new Map(),
+      currentRoomId: null,
+      pendingInvite: null,
+      inviteTargetRoomId: null,
+      hasJoinedOnce: false,
+      drafts: new Map(),
+      radio: {
+        enabled: false,
+        channel: 1,
+        stream: null,
+        peers: new Map(),
+        activeChannels: [],
+        transmitting: false,
+        muted: false
+      }
+    };
+
+    const els = {
+      body: document.body,
+      radarMode: document.getElementById('radar-mode'),
+      radioMode: document.getElementById('radio-mode'),
+      radarTab: document.getElementById('radar-tab'),
+      radioTab: document.getElementById('radio-tab'),
+      joinModal: document.getElementById('join-modal'),
+      joinForm: document.getElementById('join-form'),
+      nameInput: document.getElementById('name-input'),
+      connectionState: document.getElementById('connection-state'),
+      currentUser: document.getElementById('current-user'),
+      nearbyCount: document.getElementById('nearby-count'),
+      blipContainer: document.getElementById('blip-container'),
+      privateToggle: document.getElementById('private-toggle'),
+      roomList: document.getElementById('room-list'),
+      memberList: document.getElementById('member-list'),
+      memberCount: document.getElementById('member-count'),
+      chatTitle: document.getElementById('chat-title'),
+      messages: document.getElementById('messages'),
+      messageForm: document.getElementById('message-form'),
+      messageInput: document.getElementById('message-input'),
+      sendButton: document.getElementById('send-button'),
+      newMessagesButton: document.getElementById('new-messages-button'),
+      inviteButton: document.getElementById('invite-button'),
+      inviteModal: document.getElementById('invite-modal'),
+      inviteTitle: document.getElementById('invite-title'),
+      inviteBody: document.getElementById('invite-body'),
+      acceptInvite: document.getElementById('accept-invite'),
+      declineInvite: document.getElementById('decline-invite'),
+      refreshButton: document.getElementById('refresh-button'),
+      settingsButton: document.getElementById('settings-button'),
+      settingsModal: document.getElementById('settings-modal'),
+      settingsForm: document.getElementById('settings-form'),
+      settingsName: document.getElementById('settings-name'),
+      settingsLightMode: document.getElementById('settings-light-mode'),
+      settingsCompactMode: document.getElementById('settings-compact-mode'),
+      settingsReduceMotion: document.getElementById('settings-reduce-motion'),
+      clearLocalData: document.getElementById('clear-local-data'),
+      closeSettings: document.getElementById('close-settings'),
+      radioMicStatus: document.getElementById('radio-mic-status'),
+      radioNetworkStatus: document.getElementById('radio-network-status'),
+      radioListenerCount: document.getElementById('radio-listener-count'),
+      radioChannelDisplay: document.getElementById('radio-channel-display'),
+      radioChannelState: document.getElementById('radio-channel-state'),
+      radioChannelLabel: document.getElementById('radio-channel-label'),
+      radioChannelSlider: document.getElementById('radio-channel-slider'),
+      activeRadioCount: document.getElementById('active-radio-count'),
+      activeRadioChannels: document.getElementById('active-radio-channels'),
+      radioAudioContainer: document.getElementById('radio-audio-container'),
+      radioPowerButton: document.getElementById('radio-power-button'),
+      radioPttButton: document.getElementById('radio-ptt-button'),
+      toast: document.getElementById('toast')
+    };
+
+    const rtcConfig = {
+      iceServers: []
+    };
+
+    function cleanName(value) {
+      return String(value || '').replace(/\s+/g, ' ').trim().slice(0, 24);
+    }
+
+    function loadPreference(key, fallback = 'false') {
+      return localStorage.getItem(key) || fallback;
+    }
+
+    function applyPreferences() {
+      els.body.classList.toggle('light-mode', loadPreference('magic-link-theme') === 'light');
+      els.body.classList.toggle('compact-messages', loadPreference('magic-link-compact') === 'true');
+      els.body.classList.toggle('reduce-motion', loadPreference('magic-link-reduce-motion') === 'true');
+    }
+
+    function openSettings() {
+      els.settingsName.value = state.me?.username || savedName();
+      els.settingsLightMode.checked = loadPreference('magic-link-theme') === 'light';
+      els.settingsCompactMode.checked = loadPreference('magic-link-compact') === 'true';
+      els.settingsReduceMotion.checked = loadPreference('magic-link-reduce-motion') === 'true';
+      els.settingsModal.classList.remove('hidden');
+      els.settingsName.focus();
+    }
+
+    function closeSettings() {
+      els.settingsModal.classList.add('hidden');
+    }
+
+    function showToast(message) {
+      els.toast.textContent = message;
+      els.toast.classList.remove('hidden');
+      window.clearTimeout(showToast.timer);
+      showToast.timer = window.setTimeout(() => {
+        els.toast.classList.add('hidden');
+      }, 2800);
+    }
+
+    function formatTime(value) {
+      if (!value) {
+        return '';
+      }
+
+      return new Intl.DateTimeFormat([], {
+        hour: '2-digit',
+        minute: '2-digit'
+      }).format(new Date(value));
+    }
+
+    function identityLabel(user) {
+      if (!user) {
+        return 'Unknown';
+      }
+
+      return `${user.username}${user.code ? ` #${user.code}` : ''}`;
+    }
+
+    function identityForMessage(room, message) {
+      const member = room?.members?.find((item) => item.id === message.senderId);
+
+      return {
+        username: member?.username || message.senderName,
+        code: member?.code || message.senderCode || '',
+        color: member?.color || message.senderColor || '#56f0c0'
+      };
+    }
+
+    function importNameFromRedirect() {
+      const params = new URLSearchParams(window.location.search);
+      const username = cleanName(params.get('name'));
+
+      if (!username) {
+        return;
+      }
+
+      localStorage.setItem('magic-link-name', username);
+      params.delete('name');
+
+      const cleanUrl =
+        window.location.pathname +
+        (params.toString() ? `?${params.toString()}` : '') +
+        window.location.hash;
+
+      window.history.replaceState(
+        {},
+        document.title,
+        cleanUrl
+      );
+    }
+
+    function savedName() {
+      return cleanName(localStorage.getItem('magic-link-name'));
+    }
+
+    function joinWithSavedName() {
+      const username = savedName();
+
+      if (!username) {
+        els.joinModal.classList.remove('hidden');
+        els.nameInput.focus();
+        return false;
+      }
+
+      socket.emit('user:join', { username });
+      return true;
+    }
+
+    function setConnectionState(status) {
+      els.connectionState.classList.remove('offline', 'reconnecting');
+
+      if (status === 'online') {
+        els.connectionState.textContent = 'Online';
+        return;
+      }
+
+      if (status === 'reconnecting') {
+        els.connectionState.textContent = 'Reconnecting';
+        els.connectionState.classList.add('reconnecting');
+        return;
+      }
+
+      els.connectionState.textContent = 'Offline';
+      els.connectionState.classList.add('offline');
+    }
+
+    function updateActionStates() {
+      const room = state.rooms.get(state.currentRoomId);
+      const connected = socket.connected;
+      els.messageInput.disabled = !room || !connected;
+      els.sendButton.disabled = !room || !connected;
+      els.inviteButton.disabled = !room || !connected;
+      els.refreshButton.disabled = !connected;
+    }
+
+    function formatChannel(channel) {
+      return String(channel).padStart(3, '0');
+    }
+
+    function showMode(mode) {
+      const isRadio = mode === 'radio';
+      els.body.classList.toggle('radio-open', isRadio);
+      els.radarMode.classList.toggle('hidden', isRadio);
+      els.radioMode.classList.toggle('hidden', !isRadio);
+      els.radarTab.classList.toggle('active', !isRadio);
+      els.radioTab.classList.toggle('active', isRadio);
+    }
+
+    function updateRadioDisplay() {
+      const channelText = formatChannel(state.radio.channel);
+      const channelInfo = state.radio.activeChannels.find((item) => item.channel === state.radio.channel);
+      const listeners = channelInfo?.listeners || (state.radio.enabled ? 1 : 0);
+
+      els.radioChannelDisplay.textContent = channelText;
+      els.radioChannelLabel.textContent = `CHANNEL ${channelText}`;
+      els.radioChannelState.textContent = channelInfo ? 'ACTIVE' : 'CLOSED';
+      els.radioListenerCount.textContent = `${listeners} LISTENER${listeners === 1 ? '' : 'S'}`;
+      els.radioNetworkStatus.textContent = state.radio.enabled ? 'RADIO ON' : 'RADIO OFF';
+      els.radioPowerButton.textContent = state.radio.enabled ? 'Radio on' : 'Radio off';
+      els.radioPowerButton.classList.toggle('active', state.radio.enabled);
+      els.radioPttButton.disabled = !state.radio.enabled || state.radio.muted || !socket.connected;
+      if (state.radio.muted) {
+        els.radioMicStatus.textContent = 'MUTED';
+        els.radioMicStatus.className = 'mic-status off';
+      }
+    }
+
+    function renderActiveRadioChannels() {
+      els.activeRadioChannels.replaceChildren();
+      els.activeRadioCount.textContent = String(state.radio.activeChannels.length);
+
+      if (state.radio.activeChannels.length === 0) {
+        els.activeRadioChannels.className = 'active-radio-list empty-state';
+        els.activeRadioChannels.textContent = 'No active channels';
+        updateRadioDisplay();
+        return;
+      }
+
+      els.activeRadioChannels.className = 'active-radio-list';
+      state.radio.activeChannels.forEach((item) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'active-radio-item';
+        button.classList.toggle('selected', item.channel === state.radio.channel);
+
+        const channel = document.createElement('strong');
+        channel.textContent = `CH ${formatChannel(item.channel)}`;
+
+        const listeners = document.createElement('span');
+        listeners.textContent = `${item.listeners} listener${item.listeners === 1 ? '' : 's'}`;
+
+        button.append(channel, listeners);
+        button.addEventListener('click', () => selectRadioChannel(item.channel));
+        els.activeRadioChannels.appendChild(button);
+      });
+
+      updateRadioDisplay();
+    }
+
+    function closeRadioPeer(peerId) {
+      const peer = state.radio.peers.get(peerId);
+      if (!peer) {
+        return;
+      }
+
+      peer.pc.close();
+      peer.audio.remove();
+      state.radio.peers.delete(peerId);
+    }
+
+    function closeAllRadioPeers() {
+      Array.from(state.radio.peers.keys()).forEach(closeRadioPeer);
+    }
+
+    function ensureRadioPeer(peerId) {
+      const existing = state.radio.peers.get(peerId);
+      if (existing) {
+        return existing;
+      }
+
+      const pc = new RTCPeerConnection(rtcConfig);
+      const audio = document.createElement('audio');
+      audio.autoplay = true;
+      audio.playsInline = true;
+      els.radioAudioContainer.appendChild(audio);
+
+      const peer = {
+        pc,
+        audio,
+        pendingCandidates: []
+      };
+
+      if (state.radio.stream) {
+        state.radio.stream.getTracks().forEach((track) => pc.addTrack(track, state.radio.stream));
+      }
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit('radio:signal', {
+            targetId: peerId,
+            signal: { candidate: event.candidate }
+          });
+        }
+      };
+
+      pc.ontrack = (event) => {
+        audio.srcObject = event.streams[0];
+        audio.play().catch(() => {});
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (['failed', 'closed', 'disconnected'].includes(pc.connectionState)) {
+          closeRadioPeer(peerId);
+        }
+      };
+
+      state.radio.peers.set(peerId, peer);
+      return peer;
+    }
+
+    async function createRadioOffer(peerId) {
+      const peer = ensureRadioPeer(peerId);
+      const offer = await peer.pc.createOffer();
+      await peer.pc.setLocalDescription(offer);
+      socket.emit('radio:signal', {
+        targetId: peerId,
+        signal: { description: peer.pc.localDescription }
+      });
+    }
+
+    async function handleRadioSignal(peerId, signal) {
+      const peer = ensureRadioPeer(peerId);
+
+      if (signal.description) {
+        await peer.pc.setRemoteDescription(signal.description);
+
+        while (peer.pendingCandidates.length > 0) {
+          await peer.pc.addIceCandidate(peer.pendingCandidates.shift());
+        }
+
+        if (signal.description.type === 'offer') {
+          const answer = await peer.pc.createAnswer();
+          await peer.pc.setLocalDescription(answer);
+          socket.emit('radio:signal', {
+            targetId: peerId,
+            signal: { description: peer.pc.localDescription }
+          });
+        }
+      }
+
+      if (signal.candidate) {
+        if (peer.pc.remoteDescription) {
+          await peer.pc.addIceCandidate(signal.candidate);
+        } else {
+          peer.pendingCandidates.push(signal.candidate);
+        }
+      }
+    }
+
+    async function enableRadio() {
+      if (!socket.connected || !state.me) {
+        showToast('Connect to the server before turning on the radio.');
+        return;
+      }
+
+      try {
+        if (!state.radio.stream) {
+          state.radio.stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true
+            }
+          });
+          state.radio.stream.getAudioTracks().forEach((track) => {
+            track.enabled = false;
+          });
+        }
+
+      state.radio.enabled = true;
+      state.radio.muted = false;
+      socket.emit('radio:join', { channel: state.radio.channel });
+        updateRadioDisplay();
+      } catch (error) {
+        showToast('Microphone permission is required for radio mode.');
+      }
+    }
+
+    function disableRadio() {
+      stopTransmitting();
+      socket.emit('radio:leave');
+      closeAllRadioPeers();
+
+      if (state.radio.stream) {
+        state.radio.stream.getTracks().forEach((track) => track.stop());
+      }
+
+      state.radio.stream = null;
+      state.radio.enabled = false;
+      state.radio.muted = false;
+      updateRadioDisplay();
+    }
+
+    function selectRadioChannel(channel) {
+      const nextChannel = Math.max(1, Math.min(100, Number(channel) || 1));
+      if (nextChannel === state.radio.channel) {
+        return;
+      }
+
+      stopTransmitting();
+      closeAllRadioPeers();
+      state.radio.channel = nextChannel;
+      state.radio.muted = false;
+      els.radioChannelSlider.value = String(nextChannel);
+      updateRadioDisplay();
+      renderActiveRadioChannels();
+
+      if (state.radio.enabled) {
+        socket.emit('radio:join', { channel: nextChannel });
+      }
+    }
+
+    function startTransmitting(event) {
+      event?.preventDefault();
+      if (!state.radio.enabled || state.radio.muted || !state.radio.stream || !socket.connected) {
+        if (state.radio.muted) {
+          showToast('You are muted in this radio channel.');
+        }
+        return;
+      }
+
+      state.radio.transmitting = true;
+      state.radio.stream.getAudioTracks().forEach((track) => {
+        track.enabled = true;
+      });
+      els.radioMicStatus.textContent = 'TRANSMITTING';
+      els.radioMicStatus.className = 'mic-status transmitting';
+      els.radioPttButton.classList.add('transmitting');
+      socket.emit('radio:ptt', { active: true });
+    }
+
+    function stopTransmitting(event) {
+      event?.preventDefault();
+      if (!state.radio.transmitting) {
+        return;
+      }
+
+      state.radio.transmitting = false;
+      state.radio.stream?.getAudioTracks().forEach((track) => {
+        track.enabled = false;
+      });
+      els.radioMicStatus.textContent = 'MIC OFF';
+      els.radioMicStatus.className = 'mic-status off';
+      els.radioPttButton.classList.remove('transmitting');
+      socket.emit('radio:ptt', { active: false });
+    }
+
+    function renderRadar() {
+      els.blipContainer.replaceChildren();
+
+      if (!state.me) {
+        els.nearbyCount.textContent = '0 online';
+        return;
+      }
+
+      const onlineUsers = state.users.filter((user) => user.id !== state.me.id);
+
+      els.nearbyCount.textContent = `${onlineUsers.length} online`;
+
+      onlineUsers.forEach((user) => {
+        const blip = document.createElement('button');
+        blip.className = 'user-blip';
+        blip.type = 'button';
+        blip.style.left = `${user.x}%`;
+        blip.style.top = `${user.y}%`;
+        blip.setAttribute('aria-label', `Invite ${identityLabel(user)}`);
+
+        const initials = document.createElement('span');
+        initials.textContent = user.username.slice(0, 2).toUpperCase();
+        blip.style.setProperty('--user-color', user.color || '#56f0c0');
+
+        const label = document.createElement('strong');
+        label.textContent = identityLabel(user);
+
+        blip.append(initials, label);
+        blip.addEventListener('click', () => requestRoom(user.id));
+        els.blipContainer.appendChild(blip);
+      });
+    }
+
+    function renderRooms() {
+      els.roomList.replaceChildren();
+
+      if (state.rooms.size === 0) {
+        els.roomList.className = 'room-list empty-state';
+        els.roomList.textContent = 'No channels yet';
+        return;
+      }
+
+      els.roomList.className = 'room-list';
+
+      Array.from(state.rooms.values()).forEach((room) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'room-item';
+        button.classList.toggle('active', room.id === state.currentRoomId);
+
+        const title = document.createElement('span');
+        title.textContent = room.name;
+
+        const meta = document.createElement('small');
+        meta.textContent = `${room.members.length} member${room.members.length === 1 ? '' : 's'} · ${room.messages.length} message${room.messages.length === 1 ? '' : 's'}${room.isPrivate ? ' · private' : ''}`;
+
+        button.append(title, meta);
+        button.addEventListener('click', () => openRoom(room.id));
+        els.roomList.appendChild(button);
+      });
+    }
+
+    function renderMembers(room) {
+      els.memberList.replaceChildren();
+
+      if (!room) {
+        els.memberList.className = 'member-list empty-state';
+        els.memberList.textContent = 'Open a channel';
+        els.memberCount.textContent = '0';
+        return;
+      }
+
+      els.memberList.className = 'member-list';
+      els.memberCount.textContent = String(room.members.length);
+
+      room.members.forEach((member) => {
+        const row = document.createElement('div');
+        row.className = 'member-row';
+
+        const name = document.createElement('span');
+        name.textContent = identityLabel(member);
+        name.style.setProperty('--member-color', member.color || '#56f0c0');
+        name.className = 'member-name';
+
+        row.appendChild(name);
+
+        if (room.ownerId === socket.id && member.id !== socket.id) {
+          const actions = document.createElement('div');
+          actions.className = 'member-actions';
+
+          const kick = document.createElement('button');
+          kick.type = 'button';
+          kick.textContent = 'Kick';
+          kick.addEventListener('click', () => removeMember(room.id, member.id, false));
+
+          const ban = document.createElement('button');
+          ban.type = 'button';
+          ban.textContent = 'Ban';
+          ban.addEventListener('click', () => removeMember(room.id, member.id, true));
+
+          actions.append(kick, ban);
+          row.appendChild(actions);
+        }
+
+        els.memberList.appendChild(row);
+      });
+    }
+
+    function renderMessages(room) {
+      const wasNearBottom = isNearMessageBottom();
+      els.messages.replaceChildren();
+      els.newMessagesButton.classList.add('hidden');
+
+      if (!room) {
+        els.messages.className = 'messages empty-state';
+        els.messages.textContent = 'Select a signal to start chatting';
+        return;
+      }
+
+      if (room.messages.length === 0) {
+        els.messages.className = 'messages empty-state';
+        els.messages.textContent = 'No messages yet';
+        return;
+      }
+
+      els.messages.className = 'messages';
+
+      room.messages.forEach((message) => {
+        const bubble = document.createElement('article');
+        bubble.className = `message ${message.senderId === socket.id ? 'sent' : 'received'}`;
+
+        const identity = identityForMessage(room, message);
+        const author = document.createElement('strong');
+        author.textContent = identityLabel(identity);
+        author.style.setProperty('--message-color', identity.color);
+
+        const text = document.createElement('p');
+        text.textContent = message.text;
+
+        const time = document.createElement('time');
+        time.dateTime = new Date(message.sentAt || Date.now()).toISOString();
+        time.textContent = formatTime(message.sentAt);
+
+        bubble.append(author, text, time);
+        els.messages.appendChild(bubble);
+      });
+
+      if (wasNearBottom) {
+        scrollMessagesToBottom();
+      }
+    }
+
+    function isNearMessageBottom() {
+      return els.messages.scrollHeight - els.messages.scrollTop - els.messages.clientHeight < 80;
+    }
+
+    function scrollMessagesToBottom() {
+      els.messages.scrollTop = els.messages.scrollHeight;
+      els.newMessagesButton.classList.add('hidden');
+    }
+
+    function resizeComposer() {
+      els.messageInput.style.height = 'auto';
+      els.messageInput.style.height = `${Math.min(els.messageInput.scrollHeight, 140)}px`;
+    }
+
+    function saveCurrentDraft() {
+      if (!state.currentRoomId) {
+        return;
+      }
+
+      state.drafts.set(state.currentRoomId, els.messageInput.value);
+    }
+
+    function restoreDraft(roomId) {
+      els.messageInput.value = state.drafts.get(roomId) || '';
+      resizeComposer();
+    }
+
+    function renderActiveRoom() {
+      const room = state.rooms.get(state.currentRoomId);
+      els.chatTitle.textContent = room ? room.name : 'No channel selected';
+      updateActionStates();
+      renderMembers(room);
+      renderMessages(room);
+      renderRooms();
+    }
+
+    function openRoom(roomId) {
+      saveCurrentDraft();
+      state.currentRoomId = roomId;
+      restoreDraft(roomId);
+      renderActiveRoom();
+    }
+
+    function requestRoom(targetId) {
+      if (!socket.connected) {
+        showToast('Reconnecting. Try again in a moment.');
+        return;
+      }
+
+      const room = state.currentRoomId ? state.rooms.get(state.currentRoomId) : null;
+      socket.emit('room:request', {
+        targetId,
+        roomId: state.inviteTargetRoomId || room?.id || null,
+        isPrivate: els.privateToggle.checked
+      });
+      state.inviteTargetRoomId = null;
+      showToast('Invite sent');
+    }
+
+    function removeMember(roomId, targetId, ban) {
+      if (!socket.connected) {
+        showToast('Reconnecting. Try again in a moment.');
+        return;
+      }
+
+      socket.emit('room:remove-member', {
+        roomId,
+        targetId,
+        ban
+      });
+    }
+
+    els.joinForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const username = cleanName(els.nameInput.value);
+
+      if (!username) {
+        return;
+      }
+
+      localStorage.setItem('magic-link-name', username);
+      socket.emit('user:join', { username });
+    });
+
+    els.messageForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const room = state.rooms.get(state.currentRoomId);
+      const text = els.messageInput.value.trim();
+
+      if (!room || !text) {
+        return;
+      }
+
+      if (!socket.connected) {
+        showToast('Message not sent. Reconnecting...');
+        return;
+      }
+
+      socket.emit('message:send', {
+        roomId: room.id,
+        text
+      });
+
+      els.messageInput.value = '';
+      state.drafts.delete(room.id);
+      resizeComposer();
+    });
+
+    els.messageInput.addEventListener('input', () => {
+      saveCurrentDraft();
+      resizeComposer();
+    });
+
+    els.messageInput.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' || event.shiftKey) {
+        return;
+      }
+
+      event.preventDefault();
+
+      if (!els.sendButton.disabled) {
+        els.messageForm.requestSubmit();
+      }
+    });
+
+    els.messages.addEventListener('scroll', () => {
+      if (isNearMessageBottom()) {
+        els.newMessagesButton.classList.add('hidden');
+      }
+    });
+
+    els.newMessagesButton.addEventListener('click', scrollMessagesToBottom);
+
+    els.inviteButton.addEventListener('click', () => {
+      if (!state.currentRoomId) {
+        return;
+      }
+
+      if (!socket.connected) {
+        showToast('Reconnecting. Try again in a moment.');
+        return;
+      }
+
+      state.inviteTargetRoomId = state.currentRoomId;
+      showToast('Pick a radar signal to invite');
+    });
+
+    els.acceptInvite.addEventListener('click', () => {
+      if (!state.pendingInvite) {
+        return;
+      }
+
+      if (!socket.connected) {
+        showToast('Reconnecting. Try again in a moment.');
+        return;
+      }
+
+      socket.emit('room:accept', state.pendingInvite);
+      state.pendingInvite = null;
+      els.inviteModal.classList.add('hidden');
+    });
+
+    els.declineInvite.addEventListener('click', () => {
+      state.pendingInvite = null;
+      els.inviteModal.classList.add('hidden');
+    });
+
+    els.refreshButton.addEventListener('click', () => {
+      if (socket.connected) {
+        socket.emit('radar:refresh');
+      }
+    });
+
+    els.settingsButton.addEventListener('click', openSettings);
+    els.closeSettings.addEventListener('click', closeSettings);
+
+    els.settingsForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const username = cleanName(els.settingsName.value);
+
+      if (!username) {
+        showToast('Choose a display name.');
+        return;
+      }
+
+      localStorage.setItem('magic-link-name', username);
+      localStorage.setItem('magic-link-theme', els.settingsLightMode.checked ? 'light' : 'dark');
+      localStorage.setItem('magic-link-compact', els.settingsCompactMode.checked ? 'true' : 'false');
+      localStorage.setItem('magic-link-reduce-motion', els.settingsReduceMotion.checked ? 'true' : 'false');
+      applyPreferences();
+
+      if (socket.connected) {
+        socket.emit('user:join', { username });
+      }
+
+      closeSettings();
+      showToast('Settings saved');
+    });
+
+    els.clearLocalData.addEventListener('click', () => {
+      if (!confirm('Clear your saved name and preferences on this device?')) {
+        return;
+      }
+
+      localStorage.removeItem('magic-link-name');
+      localStorage.removeItem('magic-link-theme');
+      localStorage.removeItem('magic-link-compact');
+      localStorage.removeItem('magic-link-reduce-motion');
+      state.me = null;
+      state.rooms.clear();
+      state.currentRoomId = null;
+      applyPreferences();
+      closeSettings();
+      location.reload();
+    });
+
+    els.radarTab.addEventListener('click', () => showMode('radar'));
+    els.radioTab.addEventListener('click', () => showMode('radio'));
+
+    els.radioChannelSlider.addEventListener('input', () => {
+      selectRadioChannel(els.radioChannelSlider.value);
+    });
+
+    els.radioPowerButton.addEventListener('click', () => {
+      if (state.radio.enabled) {
+        disableRadio();
+      } else {
+        enableRadio();
+      }
+    });
+
+    els.radioPttButton.addEventListener('pointerdown', (event) => {
+      els.radioPttButton.setPointerCapture?.(event.pointerId);
+      startTransmitting(event);
+    });
+    els.radioPttButton.addEventListener('pointerup', stopTransmitting);
+    els.radioPttButton.addEventListener('pointercancel', stopTransmitting);
+    els.radioPttButton.addEventListener('lostpointercapture', stopTransmitting);
+    window.addEventListener('blur', stopTransmitting);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        stopTransmitting();
+      }
+    });
+
+    socket.on('connect', () => {
+      setConnectionState('online');
+      updateActionStates();
+
+      if (joinWithSavedName() && state.hasJoinedOnce) {
+        showToast('Back online');
+      }
+
+      if (state.radio.enabled) {
+        socket.emit('radio:join', { channel: state.radio.channel });
+      }
+    });
+
+    socket.on('disconnect', (reason) => {
+      stopTransmitting();
+      closeAllRadioPeers();
+      setConnectionState(reason === 'io client disconnect' ? 'offline' : 'reconnecting');
+      updateActionStates();
+      updateRadioDisplay();
+      showToast('Connection lost. Reconnecting...');
+    });
+
+    socket.io.on('reconnect_attempt', () => {
+      setConnectionState('reconnecting');
+      updateActionStates();
+    });
+
+    socket.io.on('reconnect_failed', () => {
+      setConnectionState('offline');
+      updateActionStates();
+      showToast('Server is still offline.');
+    });
+
+    socket.on('user:ready', (user) => {
+      state.me = user;
+      state.hasJoinedOnce = true;
+      els.currentUser.textContent = identityLabel(user);
+      els.joinModal.classList.add('hidden');
+      updateActionStates();
+      renderRadar();
+      socket.emit('radar:refresh');
+    });
+
+    socket.on('radar:update', (users) => {
+      state.users = Array.isArray(users) ? users : [];
+      renderRadar();
+    });
+
+    socket.on('room:invite', (invite) => {
+      state.pendingInvite = invite;
+      els.inviteTitle.textContent = invite.isPrivate ? 'Private invite' : 'Chat invite';
+      els.inviteBody.textContent = `${invite.requesterName} wants to connect${invite.roomId ? ' in this channel' : ' on a new channel'}.`;
+      els.inviteModal.classList.remove('hidden');
+    });
+
+    socket.on('room:update', (room) => {
+      state.rooms.set(room.id, room);
+      renderActiveRoom();
+    });
+
+    socket.on('room:opened', (room) => {
+      state.rooms.set(room.id, room);
+      openRoom(room.id);
+    });
+
+    socket.on('message:new', (message) => {
+      const room = state.rooms.get(message.roomId);
+
+      if (!room) {
+        return;
+      }
+
+      const shouldStayAtBottom = state.currentRoomId === message.roomId && isNearMessageBottom();
+      room.messages.push(message);
+
+      if (state.currentRoomId === message.roomId) {
+        renderMessages(room);
+
+        if (shouldStayAtBottom || message.senderId === socket.id) {
+          scrollMessagesToBottom();
+        } else {
+          els.newMessagesButton.classList.remove('hidden');
+        }
+      }
+    });
+
+    socket.on('room:removed', ({ roomId, type }) => {
+      state.rooms.delete(roomId);
+
+      if (state.currentRoomId === roomId) {
+        state.currentRoomId = null;
+      }
+
+      state.drafts.delete(roomId);
+
+      renderActiveRoom();
+      showToast(type === 'ban' ? 'You were banned from the channel' : 'You were removed from the channel');
+    });
+
+    socket.on('app:error', showToast);
+
+    socket.on('radio:channels', (channels) => {
+      state.radio.activeChannels = Array.isArray(channels) ? channels : [];
+      renderActiveRadioChannels();
+    });
+
+    socket.on('radio:joined', async ({ channel, peers }) => {
+      state.radio.channel = channel;
+      els.radioChannelSlider.value = String(channel);
+      updateRadioDisplay();
+
+      for (const peer of peers || []) {
+        await createRadioOffer(peer.id);
+      }
+    });
+
+    socket.on('radio:peer-joined', () => {
+      updateRadioDisplay();
+    });
+
+    socket.on('radio:peer-left', ({ peerId }) => {
+      closeRadioPeer(peerId);
+    });
+
+    socket.on('radio:signal', ({ peerId, signal }) => {
+      handleRadioSignal(peerId, signal).catch(() => {
+        closeRadioPeer(peerId);
+      });
+    });
+
+    socket.on('radio:ptt', ({ username, code, active }) => {
+      if (state.radio.transmitting) {
+        return;
+      }
+
+      els.radioMicStatus.textContent = active ? `RX ${username}${code ? ` #${code}` : ''}` : 'MIC OFF';
+      els.radioMicStatus.className = active ? 'mic-status receiving' : 'mic-status off';
+    });
+
+    socket.on('radio:admin-off', ({ reason }) => {
+      disableRadio();
+      showToast(reason === 'admin-ban' ? 'You were banned from this radio channel.' : 'Your radio was turned off by admin.');
+    });
+
+    socket.on('radio:admin-muted', ({ muted }) => {
+      state.radio.muted = Boolean(muted);
+      if (state.radio.muted) {
+        stopTransmitting();
+        showToast('You were muted in this radio channel.');
+      } else {
+        showToast('You were unmuted in this radio channel.');
+      }
+      updateRadioDisplay();
+    });
+
+    importNameFromRedirect();
+    applyPreferences();
+    showMode('radar');
+    updateRadioDisplay();
+    renderActiveRadioChannels();
+
+    window.setInterval(() => {
+      if (socket.connected && state.me) {
+        socket.emit('radar:refresh');
+      }
+    }, 2500);
+  </script>
+</body>
+</html>
